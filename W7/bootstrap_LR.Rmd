@@ -1,0 +1,101 @@
+---
+title: "Bootstrap LR"
+author: "Philipp Wacker"
+date: "2024-09-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Bootstrap 
+
+
+```{r fig.width=2}
+library(tidyverse)
+df_cars <- read.csv("cars.csv")
+ggplot(data=df_cars) + 
+  geom_point(aes(x=weight, y=mpg))
+```
+
+```{r}
+b1hat = function(data){
+  return(cov(data$mpg, data$weight)/var(data$weight))
+}
+print(b1hat(df_cars))
+```
+## Sample with replacement
+```{r fig.width=2}
+ind_boot <- sample(1:nrow(df_cars), nrow(df_cars), replace=TRUE)
+df_boot <- df_cars[ind_boot,]
+
+ggplot(data=df_boot) + 
+  geom_point(aes(x=weight, y=mpg))
+
+print(b1hat(df_boot))
+```
+
+```{r fig.width=5}
+B = 100000
+b1hat.boot <- numeric(B)
+for (b in 1:B){
+  ind_boot <- sample(1:nrow(df_cars), nrow(df_cars), replace=TRUE)
+  df_boot <- df_cars[ind_boot,]
+  b1hat.boot[b] = b1hat(df_boot)
+}
+hist(b1hat.boot)
+sd(b1hat.boot)
+```
+```{r}
+summary(lm(mpg ~ weight, data=df_cars))
+```
+
+```{r}
+library(boot)
+b1hat_ = function(data, ind){
+  return(cov(data[ind, "mpg"], data[ind, "weight"])/var(data[ind, "weight"]))
+}
+boot(df_cars, b1hat_, R=1000)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library(boot)
+b1 <- function(data, ind){
+  return(cov(data[ind, "mpg"],data[ind, "weight"])/var(data[ind, "weight"]))
+}
+b1(df_cars)
+summary(lm(mpg~weight, data = df_cars))
+(boot(data = df_cars, statistic = b1, R = 1000))
+
+```
+

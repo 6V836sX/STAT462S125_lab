@@ -1,0 +1,56 @@
+---
+title: "Hand measurements"
+author: "Philipp Wacker"
+date: "2024-07-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+load libraries
+
+```{r}
+library(ggplot2)
+```
+
+## Hand measurements
+
+```{r}
+span <- c(19, 18, 21, 20.7, 18.5, 21.5, 22)
+cubit <- c(45, 45.5, 46.2, 46, 39, 43, 49)
+df_hand <- data.frame(span = span, cubit = cubit)
+write.csv(df_hand, file="measurements.csv")
+```
+
+Compute the mean handspan by
+
+$mean(span) = \frac{1}{N}\sum_{i=1}^N s_i$
+
+```{r}
+mean_span <- sum(span)/length(span)
+```
+
+Next we compute the variance
+
+$var(span) = \frac{1}{N-1}\sum_{i=1}^N (s_i - mean(span))^2$
+
+```{r}
+var_span <- sum((span - mean_span)^2) /( length(span) - 1)
+sd_span <- sqrt(var_span)
+```
+
+Plot `span` vs `cubit`:
+
+```{r}
+ggplot(data=df_hand, aes(x=cubit, y=span)) +
+  geom_point()
+```
+
+Investigate correlation between these variables
+
+```{r}
+cov_span_cubit <- NULL
+corr_span_cubit <- NULL
+```

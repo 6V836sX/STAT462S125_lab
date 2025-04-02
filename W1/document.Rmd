@@ -1,0 +1,23 @@
+---
+title: "Demonstration"
+author: "Philipp Wacker"
+date: "2024-07-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We load a dataset recording the distance `dist` for reaching a full stop from a speed `speed`. 
+
+```{r}
+df_braking <- read.csv("braking.csv")
+```
+
+Next we plot `dist` versus `speed` to see the effect of speeding on the braking distance.
+
+```{r}
+plot(df_braking$speed, df_braking$dist)
+```
+

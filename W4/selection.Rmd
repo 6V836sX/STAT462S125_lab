@@ -1,0 +1,187 @@
+---
+title: "feature selection"
+author: "Philipp Wacker"
+date: "2024-08-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+Start a new RMD doc
+load up the cars dataset
+
+
+```{r}
+df_cars <- read.csv("cars.csv")
+df_cars$horsepower = as.double(df_cars$horsepower)
+df_cars_training <- df_cars[1:280,]
+df_cars_valid <- df_cars[281:300,]
+df_cars_test <- df_cars[301:317,]
+```
+
+## Empty model
+
+```{r}
+
+```
+
+
+```{r}
+lm0 <- lm(mpg ~ 1, df_cars_training)
+MSE0 <- mean((df_cars_training$mpg - predict(lm0))^2)
+```
+
+## One-feature models:
+
+```{r}
+lm1 <- lm(mpg ~ cylinders, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+```{r}
+lm1 <- lm(mpg ~ displacement, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+```{r}
+lm1 <- lm(mpg ~ weight, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+```{r}
+lm1 <- lm(mpg ~ year, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+```{r}
+lm1 <- lm(mpg ~ acceleration, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+weight won! (MSE = 13.2688)
+
+## Two-feature models
+
+```{r}
+lm1 <- lm(mpg ~ weight + cylinders, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+```{r}
+lm1 <- lm(mpg ~ horsepower + displacement, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+```{r}
+lm1 <- lm(mpg ~ horsepower + weight, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + acceleration, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + year, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+Horsepower + year, MSE = 9.473129
+
+## Three features:
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + cylinders, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + displacement, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + weight, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + acceleration, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+Horsepower + Year + Weight, MSE = 6.395486
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + weight + cylinders, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + weight + displacement, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + weight + acceleration, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+horsepower + year + weight + acceleration, MSE = 6.31509
+
+## Five features
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + weight + acceleration + cylinders, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + weight + acceleration + displacement, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+horsepower + year + weight + acceleration + displacement, MSE = 6.291113
+
+# Last model:
+
+```{r}
+lm1 <- lm(mpg ~ horsepower + year + weight + acceleration + displacement + cylinders, df_cars_training)
+MSE1 <- mean((df_cars_training$mpg - predict(lm1))^2)
+print(MSE1)
+```
+
+```{r}
+features = c("horsepower", "year", "weight", "acceleration", "displacement", "cylinders")
+
+MSE_tr <- numeric(6)
+MSE_val <-  numeric(6)
+for (k in 1:6){
+  form <- paste("mpg ~ ", paste0(features[1:k], collapse = " + "))
+  lmk <- lm(form, df_cars_training)
+  MSE_tr[k] <- mean((df_cars_training$mpg - predict(lmk))^2)
+  MSE_val[k] <- mean((df_cars_valid$mpg - predict(lmk, newdata=df_cars_valid))^2)
+}
+
+ggplot() +
+  geom_line(aes(x=1:6, y=MSE_tr, color="training")) +
+  geom_line(aes(x=1:6, y=MSE_val, color="validation"))
+
+```
+
+
+

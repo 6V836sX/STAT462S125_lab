@@ -1,0 +1,650 @@
+---
+title: "STAT462 Computer Lab 7"
+subtitle: "Cross-Validation and Bootstrap"
+author: "Speedy Jiang"
+output:
+  bookdown::html_document2: 
+    toc: yes
+    number_sections: yes
+    toc_float: yes
+---
+
+
+```{=html}
+<style>
+.boxTask {
+background-color: lightblue;
+color: black;
+border: 2px solid black;
+margin: 5px;
+padding: 5px;
+font-style: italic;
+}
+
+.hljs-comment{
+color: #2e8540;
+}
+
+.boxNote {
+background-color: Tomato;
+color: white;
+border: 2px solid black;
+margin: 5px;
+padding: 5px;
+}
+
+.fill-in-blank {
+background-color: lightyellow;
+border: 2px solid #6f2c87;
+}
+
+</style>
+```
+
+
+```{r setup, include = FALSE}
+Sys.setenv(LANG = "en")
+knitr::opts_chunk$set(eval=FALSE, 
+                      fig.align = 'center', 
+                      out.width = '75%',
+                      message = FALSE,
+                      warning = FALSE)
+library(Lock5Data)
+library(tidyverse)
+library(data.table)
+```
+
+In this lab, we will practice two re-sampling methods: cross-validation and bootstrap. In the first half, we will compare the cross-validation approach with linear regression and k-NN regression which we have done in Lab3 and the second half is about estimating a correlation between two samples by using bootstrap.
+
+<div class="fill-in-blank">
+The normal code blocks are with grey background, but some of the codes are not complete, you will need to replace the "____" part with your own code to run it smoothly, those code blocks are styled like this one. 
+</div>
+
+# Set up
+
+We will be using the `HollywoodMovies2013` dataset from the library `Lock5Data`, this dataset has the information from 970 movies released from Hollywood between 2007 and 2013.
+
+We will select 200 movies randomly and investigate two variables in this lab. ***RottenTomatoes*** is the reviewers rating from [Rotten Tomatoes](https://www.rottentomatoes.com/), let's use this rating to estimate the ***WorldGross***, the gross income for all viewers.
+
+Let's split the dataset into three parts, `train`-`valid`-`test`, for linear regression and k-NN regression methods first, then in cross-validation method, we will combine `train` and `valid` as "`new train`", so that we have the same set for testing across different methods. 
+
+<center>
+![Validation set approach](Lab7_Validation_set_approach.png){width=50%}
+</center>
+
+This shall be a piece of cake for you now:
+
+```{r class.source="fill-in-blank"}
+library(Lock5Data)
+set.seed(10)
+# we only need two variables for this lab and omit the NAs to make things easier.
+data <- Lock5Data::HollywoodMovies2013 %>%
+  dplyr::select(RottenTomatoes, WorldGross) %>%
+  na.omit()%>% 
+  # "The Call" and "All about Steve" have multiple entries, remove duplicates
+  .[!duplicated(.), ] %>%
+  slice_sample(n = 200)
+
+# split the dataset into train, valid and test with the ratio 70-15-15
+
+df_train <- ____
+df_valid <- ____
+df_test <- ____
+
+# df_train and df_valid is combined into df_train_cv for cross-validation part
+df_train_cv <- ____
+```
+
+
+```{r include=FALSE, eval=TRUE}
+library(Lock5Data)
+set.seed(10)
+# we only need two variables for this lab and omit the NAs to make things easier.
+data <- Lock5Data::HollywoodMovies2013 %>%
+  select(RottenTomatoes, WorldGross) %>%
+  na.omit()%>% 
+  # "The Call" and "All about Steve" have multiple entries, remove duplicates
+  .[!duplicated(.), ] %>%
+  slice_sample(n = 200)
+
+# tidyverse way
+set.seed(10)
+df_train <- data %>% 
+  slice_sample(prop = 0.7) 
+set.seed(10)
+df_valid <- data %>%
+  anti_join(df_train) %>% 
+  slice_sample(prop = 0.5)
+
+df_test <- data %>%
+  anti_join(rbind(df_train, df_valid))
+
+# df_train and df_valid is combined into df_train_cv for cross-validation part
+df_train_cv <- data %>%
+  anti_join(df_test)
+```
+
+# Cross-validation 
+
+## Validation set approach
+
+Let's apply the linear regression and k-NN regression with the validation set approach first.
+
+### k-NN regression
+
+In lab 3, you were asked to make a function that can estimate the response with given number of neighbours, we will recycle that function.
+
+```{r eval=TRUE}
+kNN <- function(data, k = 5, x0, y0, xstar) {
+  # data: dataframe to use, data.frame
+  # k: number of neighbours, integer
+  # x0: name of explanatory variable, character
+  # y0: name of response variable, character
+  # xstar: explanatory of the new datapoint to estimate, double
+
+  ystar <- data %>%
+    # generate distance between new x and each existing x
+    mutate(dist = abs(!!as.name(x0) - xstar)) %>%
+    # sort the distance
+    arrange(dist) %>%
+    # subset the first k rows
+    slice(1:k) %>%
+    # select the target response
+    pull(!!as.name(y0)) %>%
+    # take the average response as the estimate
+    mean()
+
+  return(ystar)
+}
+```
+
+Similarly, we will use the Mean Squared Error to evaluate the performance.
+
+```{r class.source="fill-in-blank"}
+# setup a vector to store the MSE for each K
+valid_mse_knn <- numeric(50)
+
+# investigate the number of neighbours from 1 to 50
+K = seq(from = 1, to = 50, by = 1)
+
+for (i in 1:____) {
+  predicted <- sapply(
+    # feed the explanatory from validation set to the function
+    X = ____$RottenTomatoes,
+    # THE function  
+    FUN = ____,
+    # training set
+    data = ____,
+    # explanatory variable name, in character
+    x0 = ____,
+    # response variable name, in character
+    y0 = ____,
+    # number of neighbours
+    k = i
+  )
+
+  # get the MSE and assign the result to a vector
+  valid_mse_knn[i] <- mean((____ - ____)^2)
+}
+```
+
+
+
+Ggplot is our go-to visualisation method in most of the cases, but we can just use the `plot()` function for a quick check, the distribution of *k* and its corresponded MSE can be visualised as:
+
+```{r eval=TRUE, fig.cap="MSE of k-NN regression with validation set approach"}
+plot(K, valid_mse_knn, type = "b", xlab = "Number of k", ylab = "MSE")
+```
+
+<div class="boxTask">
+Have a go:
+
+Looking at this validation, which *k* value should we pick and what is the test MSE associated to that?
+</div>
+
+
+### Linear regression
+
+In lab4, we used the so-called ordinary least squares(OLS) estimation to find the coefficients of a linear regression, which is for the regression $\widehat{\underline y} =A \widehat{\underline b}$, suppose  
+$$A = \left[
+\begin{array}{ccccc}
+1& x^{(1)}_1 & x^{(2)}_1 & \cdots & x^{(p)}_1 \\
+1& x^{(1)}_2 & x^{(2)}_2 & \cdots & x^{(p)}_2  \\
+\vdots & \vdots & \vdots & \ddots & \vdots\\
+1& x^{(1)}_n & x^{(2)}_n & \cdots & x^{(p)}_n  \\
+\end{array}
+\right]$$
+
+the optimal coefficients can be calculated as following: $\widehat{\underline b} = (A^\top A)^{-1} A^\top \underline y$,
+
+if we use `R` as the calculator:
+
+```{r}
+b <-  solve(t(A) %*% A) %*% t(A) %*% y
+```
+
+In this part, we need to find out what is the best polynomial degree (no larger than 3) when we use ***RottenTomatoes*** to estimate the ***WorldGross*** under the MSE evaluation.
+
+$$\hat{WorldGross} = \Sigma_{i=0}^{3}b_n\cdot RottenTomatoes^n \\ = b_0+b_1\cdot RottenTomatoes^1+b_2\cdot RottenTomatoes^2+\dots+b_n\cdot RottenTomatoes^n$$
+
+We recycle the function from Lab 4, section 3 and section 4.
+
+```{r class.source="fill-in-blank"}
+get_lr_mse <- function(data_train, x0, y0, degree = 1, data_test) {
+  # data_train: training set
+  # x0: name of explanatory variable, character
+  # y0: name of response variable, character
+  # degree: the highest polynomial degree of the explanatory variable
+  # data_test: test set
+  
+  # when the polynomial degree is 0, the prediction is just the average value of y
+  y <- data_train[[____]]
+  
+  if (degree == 0) {
+    pred <- mean(____)
+  } else if (degree > 0) {
+    # when the highest polynomial degree is greater than 0, use matrix algebra to find the coefficients
+    A <- cbind(
+      matrix(data = rep(1, dim(data_train)[1])),
+      poly(data_train[[x0]], degree, raw = TRUE)
+    )
+    b <-  solve(t(A) %*% A) %*% t(A) %*% y
+    pred <- apply(
+      X = sapply(0:degree, function(i) b[i + 1] * data_test[[x0]]^i),
+      MARGIN = 1,
+      FUN = sum
+    )
+  }
+  
+  MSE <- mean((____ - ____[[y0]])^2)
+  
+  return(MSE)
+}
+```
+
+
+
+Now let's find out the performance on the validation set of different polynomial degrees.
+
+```{r eval=TRUE, fig.cap="MSE of linear regression with validation set approach"}
+degrees <- c(0:3)
+
+valid_mse_lr <- purrr::map_dbl(degrees, function(i) {
+  get_lr_mse(
+    data_train = df_train,
+    x0 = "RottenTomatoes",
+    y0 = "WorldGross",
+    data_test = df_valid,
+    degree = i
+  )
+})
+```
+
+<div class="boxTask">
+Have a go:
+
+Which model should be applied on the test set (the `plot()` function can help you on this) and what is the MSE if we apply this model on the test set?
+</div>
+
+```{r include=FALSE}
+get_lr_mse(
+  data_train = df_train,
+  x0 = "RottenTomatoes",
+  y0 = "WorldGross",
+  data_test = df_test,
+  degree = 1
+)
+
+plot(degrees, valid_mse_lr, type = "b", xlab = "Degree of polynomial", ylab = "MSE")
+```
+
+## Cross-validation approach
+
+For a *K*-fold cross-validation, we divide the training set into *K* groups with approximately same size randomly, in each iteration, we use *K-1* sets for training and use the left one to get the validation error, after repeating this process *K* times, we should get *K* errors and we will use the average of those *K* errors for hyperparameter tuning.
+
+### Set up folds
+
+Let's start with 5-fold cross-validation.
+
+Our ***df_train_cv*** data frame has `r dim(df_train_cv)[1]` cases, each fold should have `r floor(dim(df_train_cv)[1]/5)` cases.
+
+```{r eval=TRUE}
+set.seed(10)
+
+# build fold index and randomise it
+folds5 <- sample(rep(1:5, dim(df_train_cv)[1]/5), dim(df_train_cv)[1])
+```
+
+### k-NN regression with cross-validation
+
+Now let's apply the cross-validation with the k-NN regression.
+
+One iteration on k = 1 would be like: 
+
+```{r}
+number_of_neighbours <- 1
+
+# suppose we use fold 1 for validation first
+train_data <- df_train_cv[folds5 != 1, ]
+valid_data <- df_train_cv[folds5 == 1, ]
+
+# get the estimated y from the kNN function we built earlier
+predicted <- sapply(X = valid_data$RottenTomatoes, FUN = kNN, data = train_data, x0 = "RottenTomatoes", y0 = "WorldGross", k = number_of_neighbours)
+
+# get the MSE
+mean((predicted - valid_data$WorldGross)^2)
+```
+
+After repeating this process 5 times, we take the average of those MSEs as the MSE of a 5-fold cross-validation on a **1-NN** regression. 
+
+Namely, we can get the MSE for 1-NN through the following code:
+
+```{r eval=TRUE}
+number_of_neighbours <- 1
+mse_for_each_fold <- numeric(5)
+
+# 5-fold iterations
+for (i in 1:5) {
+    # suppose we use fold 1 for validation first
+    train_data <- df_train_cv[folds5 != i, ]
+    valid_data <- df_train_cv[folds5 == i, ]
+
+    # get the estimated y from the kNN function we built earlier
+    predicted <- sapply(X = valid_data$RottenTomatoes, FUN = kNN, data = train_data, x0 = "RottenTomatoes", y0 = "WorldGross", k = number_of_neighbours)
+
+    # get the MSEs from each validation fold
+    mse_for_each_fold[i] <- mean((predicted - valid_data$WorldGross)^2)
+}
+
+# take the average as the MSE for 1-NN
+mse_for_k1 <- mean(mse_for_each_fold)
+mse_for_k1
+```
+
+Likewise, we do this process for 2-NN, 3-NN, ... and stop at 50-NN for this lab. We can build a nested for-loop to get MSEs for all *k*s: 
+
+```{r , class.source="fill-in-blank"}
+valid_mse_knn_cv <- numeric(50)
+mse_for_each_fold <- numeric(5)
+
+# we will stop at 50-NN
+for (j in 1:50){
+  for (i in 1:____) {
+    
+  ____
+
+  }
+  valid_mse_knn_cv[j] <- mean(mse_for_each_fold)
+}
+```
+
+<div class="boxTask">
+Have a go:
+
+-   Complete the nested for-loops and visualise the result of the cross-validation approach.
+-   What is the *k* value that the cross-validation approach suggesting us and what is the MSE if we apply it on the test set?
+</div>
+
+```{r include=FALSE}
+plot(K, valid_mse_knn_cv, type = "b", xlab = "Number of K", ylab = "MSE")
+
+prediction_knn_cv <- sapply(
+  X = df_test$RottenTomatoes,
+  FUN = kNN,
+  data = df_train_cv,
+  x0 = "RottenTomatoes",
+  y0 = "WorldGross",
+  k = 9
+)
+
+mean((prediction_knn_cv - df_test$WorldGross)^2)
+```
+
+### Linear regression with cross-validation
+
+With the same procedure, let's apply the `get_lr_mse()` function we created earlier to see if we would get a different result from cross-validation approach. 
+
+```{r eval=TRUE}
+valid_mse_lr_cv <- numeric(4)
+mse_for_each_fold <- numeric(5)
+
+# apply the same degrees we used in Validation set approach
+for (j in degrees){
+  for (i in 1:5) {
+    # suppose we use fold 1 for validation first
+    train_data <- df_train_cv[folds5 != i, ]
+    valid_data <- df_train_cv[folds5 == i, ]
+
+    # our customised function returns the mse  
+    mse_for_each_fold[i] <- get_lr_mse(
+      data_train = train_data,
+      x0 = "RottenTomatoes",
+      y0 = "WorldGross",
+      data_test = valid_data,
+      degree = j
+    )
+  }
+  valid_mse_lr_cv[j+1] <- mean(mse_for_each_fold)
+}
+```
+
+<div class="boxTask">
+Have a go:
+
+-   What is the result this time and what is the MSE on the test set?
+-   We used a 5-fold cross-validation in our example, try it with 10-fold.
+</div>
+
+## Inbuilt libraries and functions
+
+`caret` package can do the cross-validation with *k-NN* method (and many others).
+
+```{r eval=TRUE}
+library(caret)
+set.seed(10)
+control <- trainControl(method = "cv", number = 5) 
+
+# define a grid of k values to tune, we did from 1 to 50 in this lab earlier
+tune_grid <- expand.grid(k = seq(1, 50, by = 1)) 
+
+#train the k-NN model
+model_knn <- train(WorldGross ~ RottenTomatoes, 
+                   data = df_train_cv, 
+                   method = "knn",
+                   trControl = control, 
+                   tuneGrid = tune_grid)
+```
+
+
+```{r eval=TRUE, fig.cap="MSE of k-NN regression with 5-fold cross-validation inbuilt approach"}
+plot(model_knn$results$k, 
+     model_knn$results$RMSE^2,
+     type = "b",
+     xlab = "K", ylab = "MSE")
+```
+
+`boot` library can do cross-validation as well and it has the inbuilt function for linear regression.
+
+```{r eval=TRUE}
+library(boot)
+set.seed(10)
+cv_5fold <- numeric(4)
+
+for (i in 0:3){
+  if (i == 0){
+    y <- df_train_cv[["WorldGross"]]
+    pred <- mean(y)
+    MSE <- mean((pred - df_train_cv[["WorldGross"]])^2)
+  } else {
+    glm.fit <- glm(WorldGross ~ poly(RottenTomatoes, i), data = df_train_cv)
+    # the first element in "delta" is the MSE
+    MSE <- boot::cv.glm(df_train_cv, glm.fit, K=5)$delta[1]
+  }
+  cv_5fold[i+1] <- MSE
+}
+
+```
+
+
+```{r eval=TRUE, fig.cap="MSE of linear regression with 5-fold cross-validation inbuilt approach"}
+plot(0:3, cv_5fold, type="b", xlab = "Degree of polynomial", ylab = "MSE")
+```
+
+# Bootstrap
+
+Bootstrap is sampling with replacement, we will apply this resampling method to estimate the correlation between two univariate Gaussian distributions.
+
+## Set up
+
+Suppose we have two samples and they have a relationship as followed:
+
+```{r eval=TRUE}
+set.seed(10)
+X <- rnorm(100, 0, 1)
+Y <- rnorm(100, 2, 2) - 2 * X
+```
+
+And if we put them into a scatter plot: 
+
+```{r eval=TRUE, fig.height=4, fig.width=4, fig.align='center'}
+plot(X, Y, type = "p", xlab = "X", ylab = "Y")
+```
+
+Our point estimate of the correlation between *X* and *Y* is $`r cor(X, Y)`$.
+
+## Bootstrap iterations
+
+Since bootstrap is the sampling with replacement, the `sample()` function can easily get us a bootstrapped sample: 
+
+```{r eval=TRUE}
+set.seed(10)
+# resample 100 pairs with replacement
+boot_id <- sample(1:100, 100, replace = TRUE)
+# bootstrap sample of X 
+X_boot <- X[boot_id]
+# bootstrap sample of Y
+Y_boot <- Y[boot_id]
+```
+
+So the correlation between our first set of bootstrap samples is $`r cor(X_boot, Y_boot)`$. 
+
+We shall repeat this process many times to get a reliable result.
+
+```{r class.source="fill-in-blank"}
+set.seed(10)
+boot_corr <- numeric(10000)
+
+# repeat the bootstrap sampling for 10000 times should be sufficient, let's apply 10000 here
+for (i in ____) {
+  
+  ____
+
+  boot_corr[i] <- ____
+}
+```
+
+
+
+## Check the results
+
+Once we have all the correlations from the bootstrapped pairs, we can use a histogram to check the distribution:
+
+```{r eval=TRUE, fig.cap="Bootstrap distribution for 10000 times"}
+hist(boot_corr, main= 'Bootstrap samples distribution', xlab='', ylab='', breaks = 50)
+abline(
+  v = c(mean(boot_corr), cor(X, Y)),
+  col = c("#00AA0066", "#AA000066"),
+  lty = c(1, 3),
+  lwd = c(3, 3)
+)
+legend("topright",
+  legend = c(
+    paste("Bootstrap mean", round(mean(boot_corr), 3), sep = ": "),
+    paste("Point estimate", round(cor(X, Y), 3), sep = ": ")
+  ),
+  col = c("#00AA0066", "#AA000066"), lty = c(1, 3)
+)
+```
+
+The standard error is `r sd(boot_corr)` and from the graph above, we can tell that the correlation of Bootstrap samples are normal distributed and the centre(the average) is almost the same with the point estimate. 
+
+To get the 95% percentile confidence interval, we can use the `quantile()` function.
+
+```{r eval=TRUE}
+quantile(boot_corr, c(0.025, 0.975))
+```
+
+<div class="boxTask">
+Have a go:
+
+- What is the 95% confidence intervals if we bootstrap 10 iterations, 100 iterations or 1000 iterations?
+- During the bootstrap process above, we resampled index first and make sure the bootstrap sample of X and Y have the same index from the original data, what if we do the bootstrap process separately on X and Y as the following way, can we get the same result and why is that?
+
+```{r}
+X_boot <- sample(X, 100, TRUE)
+Y_boot <- sample(Y, 100, TRUE)
+
+boot_corr[i] <- cor(X_boot, Y_boot)
+```
+</div>
+
+##  The theoretical value
+
+`r cor(X_boot, Y_boot)` is our point estimation of the correlation between X and Y, what is the theoretical value if we have samples following the given distribution?
+
+By definition, $Corr(X,\ Y)=\frac{Cov(X,\  Y)}{\sqrt{Var(X)\cdot Var(Y)}}$, let $Z$ be a distribution that follows $\mathcal{N}(2,\ 4)$, then we have $X \sim \mathcal{N}(0,\  1)$ and $Y = Z-2\cdot X$. 
+
+\begin{align*}
+Cov(X, Y) &= Cov(X, \ Z-2 \cdot X) \\
+&= Cov(X, \ Z)- 2 \cdot Cov(X, \ X) \\
+&= Cov(X, \ Z) - 2 \cdot Var(X) \\
+&= Cov(X, \ Z)-2
+\end{align*}
+
+Since $X$ and $Z$ are independent, $Cov(X, Z)=0$, thus $Cov(X, \ Y)=-2$.
+
+While 
+\begin{align*}
+Var(Y) &=Var(Z-2\cdot X)\\ 
+&= Var(Z)+Var(2\cdot X)\\ 
+&= Var(Z)+4\cdot Var(X) \\ 
+&= 4+4 
+\end{align*}
+
+So $Corr(X,\ Y)=\frac{Cov(X,\  Y)}{\sqrt{Var(X)\cdot Var(Y)}} = \frac{-2}{\sqrt{1\times 8}}=-\frac{1}{\sqrt(2)} \approx -0.707(3dp)$, for `set.seed(10)`, the theoretical correlation is within the 95% bootstrap confidence interval of the original samples we generated.
+
+## Inbuilt libraries and functions
+
+`boot` library can do the bootstrapping as well for sure.
+
+```{r eval=TRUE}
+# build a function to return us the correlation between two variables
+df <- data.frame(X,Y)
+
+get_cor <- function(data, index){
+  return(cor(data[index, 1], data[index, 2]))
+}
+
+# one bootstrap iteration would be:
+get_cor(df, sample(100,100,replace=T))
+
+# use boot() functions to do it 10000 times
+set.seed(10)
+boot_result <- boot(data = df, statistic = get_cor, R = 10000)
+```
+
+
+```{r eval=TRUE}
+# show results
+boot_result
+```
+
+
+```{r eval=TRUE, fig.cap="Apply plot() on the boot_result"}
+# can apply the plot() function on the result directly
+plot(boot_result)
+```
+
+
+
+*End of lab7*

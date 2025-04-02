@@ -1,0 +1,867 @@
+---
+title: "STAT462 Computer Lab 4"
+author: "Speedy Jiang"
+subtitle: Multiple Linear Regression
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{=html}
+<style>
+.boxTask {
+background-color: lightblue;
+color: black;
+border: 2px solid black;
+margin: 5px;
+padding: 5px;
+font-style: italic;
+}
+
+
+.boxNote {
+background-color: Tomato;
+color: black;
+border: 2px solid black;
+margin: 5px;
+padding: 5px;
+}
+
+.fill-in-blank {
+background-color: lightyellow;
+border: 2px solid #6f2c87;
+}
+
+</style>
+```
+
+```{r setup, include = FALSE}
+Sys.setenv(LANG = "en")
+knitr::opts_chunk$set(eval=FALSE)
+#  `knitr::opts_chunk$set(eval=FALSE)`  
+   # - 设置 knitr 代码块默认不执行 (`eval=FALSE`)，这样所有的 R 代码不会在编译 R Markdown 时运行，仅作为展示。
+   # - 适用于想要在文档中展示代码但不执行代码的情况，例如教学、示例或避免运行可能有副作用的代码。
+library(MASS)
+library(tidyverse)
+library(skimr)
+```
+
+We explored the relationship between the home value and room numbers
+from *Boston* dataset last week, in this lab, we will continue to
+predict the home value but with more features involved.
+
+::: fill-in-blank
+The normal code blocks are with grey background, but some of the codes
+are not complete, you will need to replace the "\_\_\_\_" part with your
+own code to run it smoothly, those code blocks are styled like this one.
+:::
+
+# Set up
+
+We will apply the similar set ups as last lab, but this time we will
+split the original dataset into three portions: training, validation and
+testing, with the ratio of 8:1:1.
+
+```{r eval = TRUE}
+set.seed(1)
+train_ind <- sample(1:506, size = 506*0.8) #从506个数据点中随机抽取80%（约405个）作为训练集的索引。
+not_train_ind <- setdiff(1:506, train_ind) # setdiff(x, y) 返回 x 中不属于 y 的元素
+# not_train_ind 获取未被选为训练集的101个数据点（506-405=101）。
+valid_ind <- sample(not_train_ind, size = 51)
+# valid_ind 从这些未被选中的101个数据点中随机抽取51个作为验证集的索引。
+
+df_train <- MASS::Boston[train_ind, ]
+df_valid <- MASS::Boston[valid_ind, ]
+df_test <- MASS::Boston[-c(train_ind, valid_ind), ]
+```
+
+# First impression
+
+We only used the `rm` feature last time, let's take `age`, `chas` and
+`ptratio` (check `?Boston` to get the details of those features) into
+account this week. We start by a quick visual exploration between these
+features and the response variable
+`medv`.(自住房的中位数价值（单位：\$1000)) While we cannot do anything
+quantitative with this graph, it definitely gives us some initial
+insights as to what we should expect from the outcome of our method. For
+example, high values of `ptratio` (pupil teacher ratio, i.e. red markers
+mean high values of `ptratio`) tend to be associated with lower median
+value of properties.
+
+```{r}
+skim(Boston)
+```
+
+```{r eval = TRUE}
+# 加载 ggplot2 包（如果尚未加载）
+library(ggplot2)
+# 在 ggplot2 中，+ 号用于连接多个图层（layers），遵循 “图层叠加” 语法。每个 ggplot() 代码块其实是一个 图形对象，你可以用 + 号依次添加不同的图层，如数据点、回归线、主题、标签等。
+
+
+# 创建散点图，分析房间数（rm）与房价（medv）的关系
+p <- ggplot(data = df_train, aes(x = rm, y = medv)) +  
+  # 添加散点，设置形状 (chas)，填充颜色 (ptratio)，点的大小 (age)，并调整透明度
+  geom_point(aes(shape = factor(chas), fill = ptratio, size = age), alpha = 0.5) +
+  
+  # 自定义 chas 变量的形状：0 用 22 号符号（方形），1 用 24 号符号（三角形）
+  scale_shape_manual(values = c(22, 24), name = "chas") +
+  
+  # 设定 ptratio 变量的填充颜色，低值为黄色，高值为红色
+  scale_fill_gradient(low = "yellow", high = "red") +
+  
+  # 调整图例（legends），将标题位置设定在右侧
+  guides(shape = guide_legend(title.position = "right"),  # 形状图例
+         size = guide_legend(title.position = "right"),   # 大小图例
+         fill = guide_colorbar(title.position = "right")# 颜色图例
+         ) +
+  
+  # 限制 y 轴（房价）在 0 到 50 之间
+  ylim(0, 50)+
+  geom_smooth(aes(color = "lm line"), method = "lm", se = TRUE, linewidth = 1)+ # 添加回归线
+  scale_color_manual(values = c("lm line" = "blue"))
+# 显示绘制的 ggplot 图
+p
+```
+
+In order to do a quantitative analysis, and make predictions, we need a
+quantitative tool like multiple linear regression.
+
+# Compute Coefficients
+
+At this stage, you may have already figured out that there is be a
+built-in function to get us the coefficients, but let's save that for
+later. We will try to get the coefficients with some R base functions
+first, i.e. "the pedestrian way".
+
+A multiple linear regression model
+$$ \widehat{\underline y} = \widehat b_0 + \widehat b_1 \underline x^{(1)} + \cdots + \widehat b_p \underline x^{(p)}$$
+can also be expressed in matrix form:
+$\widehat{\underline y} =A \widehat{\underline b}$ where
+$\widehat{\underline b}$ is (a vector of ) the optimal regression
+parameters and $$A = \left[
+\begin{array}{ccccc}
+1& x^{(1)}_1 & x^{(2)}_1 & \cdots & x^{(p)}_1 \\
+1& x^{(1)}_2 & x^{(2)}_2 & \cdots & x^{(p)}_2  \\
+\vdots & \vdots & \vdots & \ddots & \vdots\\
+1& x^{(1)}_n & x^{(2)}_n & \cdots & x^{(p)}_n  \\
+\end{array}
+\right],$$
+
+The coefficients can be calculated as
+$\widehat{\underline b} = (A^\top A)^{-1} A^\top \underline y$.
+
+## Matrix functions in R (optional)
+
+::: boxNote
+We will go over some basic matrix operation and how it is done in R,
+it's an optional section, if you know how to manipulate matrices in R,
+you can skip this part.
+:::
+
+### Form a matrix
+
+Use `matrix()` to create a matrix with given value.
+
+```{r, eval=TRUE}
+# specifies the elements in the matrix
+M1 <- matrix(data = c(1,2,3,4,5,6))
+M1
+#  specifies the size of the column in the matrix
+M2 <- matrix(data = c(1,2,3,4,5,6), ncol = 2)
+M2
+# the elements can be arranged row-wise as well
+M3 <- matrix(data = c(1,2,3,4,5,6), nrow = 3, byrow = T) #byrow 按行填充
+M3
+
+M4 <- matrix(data = c(1, 2, 3, 4, 5, 6), nrow = 3, byrow = FALSE) # 按列填充
+M4
+```
+
+### Addition
+
+If matrix $\textbf A$ and $\textbf B$ have the same dimension, the sum
+$\textbf{A+B}$ is calculated entrywise.
+
+```{r, eval=TRUE}
+M2 + M3
+```
+
+### Scalar multiplication
+
+The product $c \textbf A$ of a number $c$ (also called a scalar in this
+context) and a matrix $\textbf A$ is computed by multiplying every entry
+of $\textbf A$ by $c$:
+
+```{r, eval=TRUE}
+2 * M2
+```
+
+### Subtraction
+
+The subtraction of two matrices can be considered as composing matrix
+addition with scalar multiplication by –1:
+$\textbf A - \textbf B = \textbf A + (-1) \textbf B$
+
+```{r, eval=TRUE}
+M2-M3
+```
+
+```{r,class.source="fill-in-blank"}
+M2 + (-1) * M3
+```
+
+### Transposition
+
+The transpose of a matrix is to flip the original matrix by switching
+its rows and columns. The transpose of $\textbf A$ is denoted as
+$\textbf A^\top$. This can be done with `t()` in R.
+
+```{r, eval=TRUE}
+t(M2)
+```
+
+### Matrix Multiplication
+
+For matrix multiplication, the number of columns in the first matrix
+must be equal to the number of rows in the second matrix. The result
+matrix has the number of rows of the first and the number of columns of
+the second matrix. The entries of result matrix are given by dot product
+of the corresponding row of the first matrix and the corresponding
+column of the second matrix.
+
+```{r, echo=FALSE, eval=TRUE, fig.align='center', out.width="50%", fig.cap="(By Svjo - Own work, CC BY-SA 4.0, https://commons.wikimedia.org/w/index.php?curid=58357697)"}
+knitr::include_graphics("MatrixMultiplication.png")
+```
+
+矩阵点积 $A_{m,n} \cdot B_{n,l} = C_{m,l}$ $C$ 的行由A的行决定， $C$
+的列由 $B$ 的列决定
+
+We can use `%*%` to multiply two matrices.
+
+```{r}
+# does it work?
+M2 %*% M3
+```
+
+M2 M3都是$3 * 2$ 矩阵，无法相乘。
+
+```{r, eval=TRUE}
+M2 %*% t(M3)
+```
+
+Be aware that matrix multiplication is not commutative. $\textbf{AB}$
+may not be the same as $\textbf{BA}$.
+
+不符合交换率。
+
+左乘 $A \times B$ 相当于对矩阵 B 的列进行线性变换（即，A 影响了 B
+的列）。 记忆，结果矩阵 $C$ 中，保留了 $A$ 的行， $B$
+的列，所以，A的列和B的行消失了。保留的是线性变换后的结果。
+
+右乘 $B \times A$ 相当于对矩阵 B 的行进行线性变换。
+
+```{r, eval=TRUE}
+t(M3) %*% M2 
+```
+
+### Identity Matrics 对角阵
+
+An identity matrix is a square matrix (number of rows and columns are
+the same) where every diagonal entry is 1 and all the other entries are
+0. The following two matrices are identity matrices and diagonal
+matrices. We can use `diag()` in R to create an identity matrix.
+
+For example, let's create an 3 $\times$ 3 indentity matrix
+
+**diagonal**（对角线）
+
+```{r, class.source="fill-in-blank"}
+I3 <- diag(nrow = 3)
+I3
+```
+
+They are called identity matrices because any square matrix multiplied
+with an identity matrix equals
+itself.任何方阵与单位矩阵相乘都等于其自身。
+
+```{r include=FALSE, eval=TRUE}
+I3 <- diag(nrow = 3)
+```
+
+```{r, eval=TRUE}
+A <- M2 %*% t(M3)
+A
+
+A %*% I3
+```
+
+### Determinant 行列式
+
+The determinant is a special number that can be calculated from a square
+matrix.
+
+The determinant of a 2 $\times$ 2 matrix $\textbf A$ is $$det(A) = |A|=
+\begin{vmatrix}
+a & b \\
+c & d
+\end{vmatrix} = a\cdot d-b\cdot c
+$$
+
+::: boxTask
+Give it a go:
+
+Calculate the determinant of $$\begin{vmatrix}
+1 & 2 \\
+3 & 4
+\end{vmatrix}$$
+:::
+
+```{r}
+A <-  matrix(1:4, nrow = 2, ncol = 2, byrow=TRUE)
+A
+det(A)
+```
+
+For a 3 $\times$ 3 matrix $\textbf B$, the determinant can be calculated
+as:
+
+$$det(B) = |B|=
+\begin{vmatrix} a & b & c\\ d & e & f\\ g & h & i \end{vmatrix} = 
+c\begin{vmatrix} d & e \\ g & h \end{vmatrix} 
+-f\begin{vmatrix} a & b \\ g & h \end{vmatrix}
++i\begin{vmatrix} a & b \\ d & e \end{vmatrix} \\
+=c(dh-eg)-f(ah-bg)+i(ae-bd) $$
+
+To generalize this process: we choose a row or column and the take the
+determinants of the "minor" matrices inside the original matrix, this is
+known as Laplace expansion. It is easier to apply Laplace expansion when
+one chooses the row or column with the most zeroes.
+
+拉普拉斯展开
+
+$$det(A)=\Sigma_{j=1}^n (-1)^{i+j} a_{i+j}det(A_{-i,-j}) = \Sigma_{i=1}^n (-1)^{i+j} a_{i+j}det(A_{-i,-j})$$
+For any $i$, $j$, where $A_{-i,-j}$ is matrix $\textbf{A}$ with row $i$
+and column $j$ removed. This formula works whether one goes by rows,
+using the first formulation, or by columns, using the second
+formulation.
+
+we can tell that the calculation becomes cumbersome as the dimension of
+the matrix increasing. In R, `det()` is the function to return us the
+determinant of a matrix.
+
+```{r, eval=TRUE}
+m <- t(M3) %*% M2
+
+det(m)
+```
+
+::: boxTask
+Give it a go:
+
+Find the determinant of following matrix: $I3$, $m^\top$ and $3 \cdot m$
+:::
+
+```{r class.source="fill-in-blank"}
+# determinant of I3 
+det(____)
+
+# determinant of the transpose of m
+det(____)
+
+# determinant of 3*m, what's the relationship between it and det(m)? 
+det(___)
+```
+
+### Matrix inverse
+
+The matrix $\textbf B$ is the inverse of matrix $\textbf A$ if
+$AB = BA = I$. This is often denoted as $B = A^{-1}$ or $A = B^{-1}$.
+Not all matrices are invertible, if the determinant of a square matrix
+is not equal to zero, the matrix has inverse.
+
+For a 2 $\times$ 2 matrix $\textbf A$, its inverse can be calculated as:
+
+$$A^{-1} = \left[ \begin{array}{cc}  a & b \\ c & d \end{array} \right]^{-1} = \frac{1}{det(A)}\left[ \begin{array}{cc}  d & -b \\ -c & a \end{array} \right] = 
+\frac{1}{ad-bc}\left[ \begin{array}{cc}  d & -b \\ -c & a \end{array} \right],$$
+
+::: boxTask
+Give it a go:
+
+Find the inverse of the following matrices if it is invertible:
+$$\left[ \begin{array}{cc}  4 & 2 \\ 2 & 1 \end{array} \right], 
+\left[ \begin{array}{cc}  4 & -2 \\ 2 & 1 \end{array} \right],
+\left[ \begin{array}{cc}  1 & 2 \\ -2 & 4 \end{array} \right]$$
+:::
+
+We can use `solve()` in R to find us the inverse of a matrix:
+
+```{r}
+solve(m)
+```
+
+::: boxTask
+Give it a go:
+
+What is the result of `solve(m) %*% m`?
+:::
+
+## Compute coefficients with matrix
+
+The optimal coefficients can be calculated as following:
+$\widehat{\underline b} = (A^\top A)^{-1} A^\top \underline y$ where
+$$A = \left[
+\begin{array}{ccccc}
+1& x^{(1)}_1 & x^{(2)}_1 & \cdots & x^{(p)}_1 \\
+1& x^{(1)}_2 & x^{(2)}_2 & \cdots & x^{(p)}_2  \\
+\vdots & \vdots & \vdots & \ddots & \vdots\\
+1& x^{(1)}_n & x^{(2)}_n & \cdots & x^{(p)}_n  \\
+\end{array}
+\right]$$
+
+Let's prepare the matrix $\textbf A$ and $\underline y$ from our
+training dataframe.
+
+```{r, class.source="fill-in-blank"}
+A <- df_train %>% 
+  # select the explanatory variables
+  dplyr::select(c(____, ____, ____, ____)) %>% 
+  # add a column with 1 for all entries
+  add_column(., X0 = 1, .before = 1) %>% 
+  as.matrix()
+
+y <- df_train %>% 
+  # select the response variables
+  dplyr::select(____) %>% 
+  as.matrix()
+```
+
+```{r include=FALSE, eval=TRUE}
+A <- df_train %>% 
+  # select the explanatory variables
+  dplyr::select(c(age, chas, ptratio, rm)) %>% 
+  # add a column with 1 for all entries
+  add_column(., X0 = 1, .before = 1) %>% 
+  as.matrix()
+
+y <- df_train %>% 
+  # select the response variables
+  dplyr::select(medv) %>% 
+  as.matrix()
+
+```
+
+Thus, we can get a vector with the optimal coefficients:
+
+```{r, class.source="fill-in-blank"}
+b = solve(____ %*% ____) %*% t(A) ____ y
+```
+
+```{r include=FALSE, eval=TRUE}
+b = solve(t(A) %*% A) %*% t(A) %*% y
+b
+```
+
+## Compute coefficients with built-in functions
+
+`lm()` can find us the coefficients of simple inear regression, it
+certain can find us the coefficients of multiple linear regression as
+well.
+
+```{r, class.source="fill-in-blank"}
+mlr.fit <- lm(formula = medv ~ ____ + ____ + ____ + ____ , data = df_train)
+
+coef(mlr.fit)
+```
+
+```{r eval=FALSE, include=FALSE}
+mlr.fit <- lm(formula = medv ~ age + chas + ptratio + rm , data = df_train)
+
+summary(mlr.fit)
+```
+
+*Do you have the same result from two different methods?*
+
+# Evaluate performance
+
+We can evaluate the performance of the multiple regression model the
+same way as the single regression model.
+
+## Goodness-of-fit
+
+R-squared quantifies how well a model fits the data,
+$R^2 = \frac{ESS}{TSS} = 1 - \frac{RSS}{TSS}$, where $TSS$ stands for
+total sum of squares, $ESS$ means explained sum of squares and $RSS$ is
+the residual sum of squares.
+
+::: boxTask
+Do you still remember how to calculate those *SS*s, check the lecture
+slides or lab3 for the formulae.
+:::
+
+```{r,class.source="fill-in-blank"}
+# total sum of squares
+TSS <- sum((____ - mean(____))^2)
+```
+
+```{r,class.source="fill-in-blank"}
+# use the coefficient vector to find the predict value
+df_train_fitted <- df_train %>% 
+  mutate(fitted_medv = b[1] + b[2] * ____ + b[3] * ____ + b[4] * ____ + b[5] * ____)
+
+# expalined sum of squares
+ESS <- sum((____ - mean(____))^2)
+
+```
+
+::: boxTask
+Give it a go:
+
+Alternatively, we can use `mlr.fit$fitted.values` to calculate the ESS.
+:::
+
+```{r,class.source="fill-in-blank"}
+# residual sum of squares
+RSS <- sum((df_train_fitted$____ - df_train_fitted$____)^2)
+```
+
+::: boxTask
+Give it a go:
+
+Alternatively, we can use `mlr.fit$residuals` to calculate the RSS.
+:::
+
+There is one problem here, if we add more parameters, the model will be
+more flexible and it will bend and twist more to come nearer the points,
+and so almost always has a higher R sqaured.
+
+To penalise the model with more explanatory variable, the adjusted
+R-squared is preferred for multiple linear regression.
+
+$$ Adjusted\  R^2=1-\frac{RSS/(n-p-1)}{TSS/(n-1)} = 1-(1-R^2)\frac{n-1}{n-p-1}$$
+where $n$ is the number of observations and $p$ is the number of
+explanatory variables.
+
+::: boxTask
+Give it a go:
+
+What is the adjusted R-squared in this case? Is your calculation the
+same with the output from `summary(mlr.fit)`?
+:::
+
+## (Root) Mean Squared Error
+
+We also need to find out the model's performance on unseen data, let's
+use the testing set to calculate the MSE here.
+
+```{r}
+y_hat_test <- predict(mlr.fit, newdata = df_test)
+
+MSE <- mean((df_test$medv - y_hat_test)^2)
+```
+
+::: boxTask
+Give it a go:
+
+Try to get the MSE without the `predict()` function.
+:::
+
+# Transformations of the Predictors
+
+The `lm()` function can also accommodate non-linear transformations of
+the predictors. For instance, given a predictor $X$, we can create a
+predictor $X^2$ using `I(X^2)`. The function `I()` is needed since the
+`^` has a special meaning in a formula object; wrapping as we do allows
+the standard usage in R, which is to raise $X$ to the power `2`. We now
+perform a regression of *medv* onto *rm\^2* instead of *rm*.
+
+```{r,class.source="fill-in-blank"}
+mlr.fit2 <- lm(formula = medv ~ age + chas + ptratio + ____, data = df_train)
+
+summary(mlr.fit2)
+```
+
+*How's the performance for this new model?*
+
+::: boxTask
+Give it a go:
+
+The transformations are not restricted to polynomial. Try a reciprocal
+transformation on *ptratio* predictor, turn it from pupil-teacher ration
+into teacher-pupil ratio.
+:::
+
+# Feature selection
+
+Unless $p$ is very small, we cannot consider all models, and instead we
+need an automated and efficient approach to choose a smaller set of
+models to consider. There are various ways to judge the quality of a
+model, the approach we demonstrate in this lab called forward stepwise
+selection:
+
+> We start with no predictors in the model, iteratively add the most
+> contributive predictors (the predictor that results in the lowest RSS
+> or highest R-squared on training set), once we have the best models in
+> each complexity, choose the best from the best.
+
+## Preparation
+
+To make the process efficient and automated, we will need to set up some
+preparations.
+
+```{r, eval=TRUE}
+# all the possible features
+features <- c("age", "chas", "ptratio", "rm")
+
+# number of features in the model, start with 0, the null model
+p <- 0
+
+# vector to store the best features in order, for the null model, we assign it as 1
+best_features <- vector(length = length(features) +1)
+
+# vector to store the MSEs of the best models in each complexity on training set
+MSE_train_best <- vector(length = length(features) +1)
+
+# vector to store the MSEs of the best models in each complexity on validation set
+MSE_valid_best <- vector(length = length(features) +1)
+```
+
+## No features, null model
+
+In `lm()`, if we want a null model, we need to set `formula` as
+`reponse ~ 1`.
+
+```{r, eval=TRUE}
+# for the null model, we set feature as 1
+predictor <- c("1")
+
+# concatenate the response with the predictor to generate a formula
+formula <- paste("medv ~", predictor, sep = " ")
+
+# use lm() to fit the model
+fit_models <- lm(formula = formula, data = df_train)
+
+# find the MSE
+MSEs_train <- mean((fit_models$residuals)^2)
+
+# store the minimum MSE, only one value at this stage though
+MSE_train_best[1] <- min(MSEs_train)
+
+# find the MSE on validation set
+MSE_valid_best[1] <- mean((predict(fit_models, newdata = df_valid) - df_valid$medv)^2)
+```
+
+Update the vectors to keep the performance recorded.
+
+```{r, eval=TRUE}
+best_features[1] <- predictor
+```
+
+So the MSE for the null model on training set is about 90. Next, we will
+need to find the best model with only one feature involved.
+
+## One feature
+
+The process is very similar to the previous part, the main difference is
+for null model, there was only one possible formula, but now we have
+four possible formulae. In order to apply the same process across all
+formulae, we can use *for loop* or `lappy()` family.
+
+```{r, eval=TRUE}
+# number of features in the model
+p <- 1
+
+# use combn() to generate all combinations of features, take p at a time, return the result as a list
+predictor <- combn(features, p, simplify = FALSE)
+
+# generate formula respectively
+formula <- sapply(predictor, function(x) paste("medv", "~", paste0(x, collapse = "+"), sep = " "))
+
+# fit model respectively
+fit_models <- lapply(formula, function(x) lm(x, data = df_train))
+
+# get MSE respectively
+MSEs_train <- sapply(1:length(fit_models), function(x) mean(fit_models[[x]]$residuals^2))
+
+MSEs_train
+```
+
+::: boxTask
+Give it a go:
+
+Use `which.min()` to determines the location of the minimum value in
+*MSEs_train*
+:::
+
+As we can see, when there is only one feature in the model, the fourth
+feature(rm) gives us the smallest MSE.
+
+Record the performance of models with one feature:
+
+```{r}
+# the feature results the smallest MSE will be stored
+best_features[1 + p] <-predictor[[which.min(MSEs_train)]]
+
+# stored the smallest MSE
+MSE_train_best[1 + p] <- min(MSEs_train)  
+
+# find out the best performed feature and store its MSE on validation set
+MSE_valid_best[1 + p] <- mean((predict(fit_models[[which.min(MSEs_train)]], newdata = df_valid) - df_valid$medv)^2)
+```
+
+## Two features, and more
+
+For next step, we will only consider `rm + age`, `rm + chas` and
+`rm + ptratio`, and leave behind the other combinations that without
+\`rm\`\`.
+
+```{r}
+# we will need two features now
+p = 2
+
+# filter out any feature combination that does not contain the stored best feature from previous step
+predictor <- Filter(function(x) all(best_features[2:p] %in% x), combn(features, p, simplify = FALSE))
+```
+
+repeat the same process to find the MSEs
+
+```{r, class.source="fill-in-blank" }
+# generate formula respectively
+formula <- sapply(predictor, function(x) paste(____, "~", paste0(x, collapse = "+"), sep = " "))
+
+# fit model respectively
+fit_models <- lapply(formula, function(x) lm(x, data = ____))
+
+## get MSE respectively
+MSEs_train <- sapply(1:length(fit_models), function(x) mean(fit_models[[x]]$____^2))
+```
+
+```{r eval=FALSE, include=FALSE}
+formula <- sapply(predictor, function(x) paste("medv", "~", paste0(x, collapse = "+"), sep = " "))
+ 
+fit_models <- lapply(formula, function(x) lm(x, data = df_train))
+
+MSEs_train <- sapply(1:length(fit_models), function(x) mean(fit_models[[x]]$residuals^2))
+```
+
+Again, record the performance:
+
+```{r, class.source="fill-in-blank"}
+# the NEW feature results the smallest MSE will be stored
+best_features[____] <- setdiff(predictor[[which.min(MSEs_train)]], best_features[2:p] )
+
+# stored the smallest MSE
+MSE_train_best[p + 1] <- min(____)  
+
+# find out the best performed feature and store its MSE on validation set
+MSE_valid_best[p + 1] <- mean((predict(fit_models[[which.min(MSEs_train)]], newdata = ____) - ____$medv)^2)
+```
+
+*What is the best feature in this step?*
+
+::: boxTask
+Give it a go:
+
+You may have noticed now, we are repeating the same process and will do
+those steps again and again until we have $M_p$, the most complicated
+model, will you be able to establish a function or loop process to
+achieve that?
+:::
+
+```{r include=FALSE, eval=TRUE}
+features <- c("age", "chas", "ptratio", "rm")
+
+p <- 0
+
+best_features <- vector(length = length(features) +1)
+
+MSE_train_best <- vector(length = length(features) +1)
+
+MSE_valid_best <- vector(length = length(features) +1)
+
+predictor <- c("1")
+
+# concatenate the response with the predictor to generate the formula
+formula <- paste("medv ~", predictor, sep = " ")
+
+# use lm() to find the model
+fit_models <- lm(formula = formula, data = df_train)
+
+# find the MSE
+MSEs_train <- mean((fit_models$residuals)^2)
+
+# store the minimum MSE, only one value at stage though
+MSE_train_best[1] <- min(MSEs_train)
+
+# find the MSE on validation set
+MSE_valid_best[1] <- mean((predict(fit_models, newdata = df_valid) - df_valid$medv)^2)
+best_features[1] <- predictor
+
+p <- 1
+
+# generate all combinations of features, take p at a time, return the result as a list
+predictor <- combn(features, p, simplify = FALSE)
+
+# generate formula respectively
+formula <- sapply(predictor, function(x) paste("medv", "~", paste0(x, collapse = "+"), sep = " "))
+
+# generate model respectively
+fit_models <- lapply(formula, function(x) lm(x, data = df_train))
+
+# get the MSE respectively
+MSEs_train <- sapply(1:length(fit_models), function(x) mean(fit_models[[x]]$residuals^2))
+
+best_features[1 + p] <-predictor[[which.min(MSEs_train)]]
+
+# stored the smallest MSE
+MSE_train_best[1 + p] <- min(MSEs_train)  
+
+# find out the best performed feature and store its MSE on validation set
+MSE_valid_best[1 + p] <- mean((predict(fit_models[[which.min(MSEs_train)]], newdata = df_valid) - df_valid$medv)^2)
+
+for (i in 2 :length(features)) {
+  p = i
+  predictor <- Filter(function(x) all(best_features[2:p]  %in% x), combn(features, p, simplify = FALSE))
+  formula <- sapply(predictor, function(x) paste("medv", "~", paste0(x, collapse = "+"), sep = " "))
+
+  fit_models <- lapply(formula, function(x) lm(x, data = df_train))
+
+  MSEs_train <- sapply(1:length(fit_models), function(x) mean(fit_models[[x]]$residuals^2))
+  best_features[p+1] <- setdiff(predictor[[which.min(MSEs_train)]],best_features[2:p] )
+  
+  MSE_train_best[1 + p] <- min(MSEs_train)  
+  
+  MSE_valid_best[1 + p] <- mean((predict(fit_models[[which.min(MSEs_train)]], newdata = df_valid) - df_valid$medv)^2)
+}
+```
+
+Once we have the MSE on validation set from the best model in each
+complexity, we can pick the single best model among them.
+
+```{r, eval=TRUE}
+df_MSE <- data.frame(feature=ordered(best_features, levels = unique(best_features)), MSE_training = MSE_train_best, MSE_valid = MSE_valid_best)
+
+# knitr::kable(df_MSE, align = "ccc")
+```
+
+And we can visualise the MSE results:
+
+```{r, eval=TRUE}
+ggplot(data=df_MSE, aes(x=feature)) +
+  geom_point(aes(y=MSE_training, color="MSE_training")) +
+  geom_line(aes(y=MSE_training, color="MSE_training", group=1)) +
+  geom_point(aes(y=MSE_valid, color="MSE_validate")) + 
+  geom_line(aes(y=MSE_valid, color="MSE_validate", group=1)) +
+  geom_point(aes(y=min(MSE_valid), x=feature[which.min(MSE_valid)]), size = 5, color = "black", shape = 13) + 
+  labs(x="Features in order", y="MSE")
+```
+
+So, which model should we be picking?
+
+*End of lab4*
