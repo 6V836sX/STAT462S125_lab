@@ -1,0 +1,461 @@
+---
+title: "STAT462 Computer Lab 5"
+subtitle: "Logistic Regression"
+author: "Speedy Jiang"
+output:
+  html_document: 
+    toc: yes
+    number_sections: yes
+    toc_float: yes
+---
+
+
+```{=html}
+<style>
+.boxTask {
+background-color: lightblue;
+color: black;
+border: 2px solid black;
+margin: 5px;
+padding: 5px;
+font-style: italic;
+}
+
+
+.boxNote {
+background-color: Tomato;
+color: black;
+border: 2px solid black;
+margin: 5px;
+padding: 5px;
+}
+
+.fill-in-blank {
+background-color: lightyellow;
+border: 2px solid #6f2c87;
+}
+
+</style>
+```
+
+
+```{r setup, include = FALSE}
+Sys.setenv(LANG = "en")
+knitr::opts_chunk$set(eval=FALSE, fig.align='center', out.width='75%')
+library(MASS)
+library(tidyverse)
+```
+
+
+We learnt how to predict a numerical response from features during the past couple of weeks, from this week we will explore how to deal with the categorical response.
+
+:::{.fill-in-blank}
+The normal code blocks are with grey background, but some of the codes are not complete, you will need to replace the "____" part with your own code to run it smoothly, those code blocks are styled like this one. 
+:::
+
+# Simple Logistic Regression
+
+In lab3, we established a simple linear regression using *rm* to predict the value of *medv* from `Boston` dataset, similar to its counterpart, simple logistic regression involves only one feature as well, but rather than modelling the response directly, logistic regression models the *probability* that the response belongs to a particular class.
+
+Suppose we have another response, *medv_new*, with two classes: 
+
+> medv_new is "High" (encode as 1), if medv is greater than or equal to the median 
+
+> medv_new is "Low" (encode as 0), if medv less than the median
+
+The distribution of *medv_new* and *rm* can be visualsed as: 
+
+```{r, eval=TRUE}
+library(MASS)
+library(tidyverse)
+
+df_boston <- MASS::Boston %>% 
+  mutate(medv_new = case_when(medv >= median(medv) ~ 1,
+                             medv < median(medv) ~ 0))
+
+ggplot(data = df_boston, aes(x = rm, y = factor(medv_new))) + 
+  geom_jitter(shape = 21, alpha = 0.75, size = 3, height=0.1) +
+  scale_y_discrete(name = "medv_new",
+                   labels = c("0(Low)", "1(High)"))
+```
+
+
+We will use a function to apply on *rm* and get the probability of *medv_new* being "High" (or "low", they are almost the same since it's a binary situation), this can be written as 
+$$Pr(medv\_new = 1|rm)$$
+
+If we input a *rm* value into this function, and yield a probability which is greater than a threshold, say 0.5, then we class the corresponded *medv_new* as "High". 
+
+To make sure the function will always return the result between 0 and 1, we can use the following function to estimate the probability of being class 1:
+
+$$g_1(x) =  \mathbb P(G = 1| X=x) = \frac{\exp(b_0 + b_1x)}{1 + \exp(b_0 + b_1 x)} $$ so the probability of being class 0 would be:  $$ g_0(x) = \mathbb P(G = 0| X=x)   = \frac{1}{1 + \exp(b_0 + b_1 x)}  $$
+
+The problem now is to find the optimal pair of b0 and b1 from the training set, does this sound familiar? 
+
+## Set up
+
+First split the dataset into a training set and a testing set with ratio of 8:2. We set a seed here so the result is consistent.
+
+```{r, class.source="fill-in-blank"}
+set.seed(1)
+
+df_train <- ____
+df_test <- ____
+```
+
+
+```{r include=FALSE, eval=TRUE}
+set.seed(1)
+train_ind <- sample(1:506, size = 506*0.8)
+
+df_train <- df_boston[train_ind, ]
+df_test <- df_boston[-train_ind, ]
+```
+
+
+
+## Estimate coefficients by hand
+
+We try to find $\hat{b_0}$ and $\hat{b_1}$ such that the estimated $\hat{g_1(x)}$ yields a number close to 1 for "High" *medv_new* and a number close to 0 for "Low" *medv_new*. This can be formalized into a *likelihood function*
+
+$$ \begin{split}\ell(b_0,b_1) &=  \prod_{i=1}^n \left[ g_1(x_i; b_0, b_1) \right]^{y_i} \cdot \left[ 1 - g_1(x_i; b_0, b_1) \right]^{1-y_i} \\
+&= \prod_{i: y_i=1}g_1(x_i; b_0, b_1) \cdot \prod_{i: y_i=0} (1 - g_1(x_i; b_0, b_1))\end{split}$$
+
+The pair that maximises $\ell(b_0,b_1)$ is the optimal value $(\hat b_0,\hat b_1)$ we are looking for.
+
+If we apply logarithm to both side of the likelihood function, we get: $$ \log(\ell(b_0,b_1)) = \sum_i (y_i(b_0 + b_1 x_i) - \log\left(1 + \exp(b_0 + b_1 x_i)\right))$$
+
+We can use the function `optim()` in R to search the optimal coefficients, for example: if we want to find the $x$ that would return the optimal value for $f(x) = x^2-2x+1$ and we start searching from $x=-500$
+
+
+```{r, eval=TRUE}
+func <- function(x) {  
+  x^2 - 2 * x + 1
+}
+
+result <- optim(par = -500, fn = func, method = "BFGS")
+```
+
+The best set of parameters can be found through `result$par`
+
+```{r, eval=TRUE}
+# The best set of parameters found.
+result$par
+```
+
+Notice that, `optim()` performs the minimisation by default, if we want to find the maximiser for our likelihood function, we can either set `fnscale` a negative value in `control` list (see `?optim()`) or apply negation to our log-likelihood and then search for minimum.
+
+
+```{r, class.source="fill-in-blank"}
+negloglikelihood <- function(b){
+  # explanatory variable
+  x = df_train$____
+  # response variable
+  y = df_train$____
+  
+  # likelihood function value
+  -sum(y*(b[1]+b[2]*x) - log(1+exp(____ + ____)))
+}
+
+res <- optim(par = c(0, 0), fn = ____, gr = NULL, method = 'BFGS')
+# extract the best set
+bhat <- res$par
+
+```
+```{r include=FALSE, eval=TRUE}
+negloglikelihood <- function(b){
+  x = df_train$rm
+  y = df_train$medv_new
+  -sum(y*(b[1]+b[2]*x) - log(1+exp(b[1] + b[2]*x)))
+}
+
+res <- optim(par = c(0, 0), fn = negloglikelihood, method = 'BFGS')
+bhat <- res$par
+```
+
+*What is the best set of parameters?*
+
+:::{.boxNote}
+- We can also provide a function that returns the gradient of fn, it is `NULL` by default.
+- `optim()` only returns the best **par** before the maximum amount of iteration is reached, it may not be the overall optimum.
+:::
+
+
+### Visualisation
+
+We can draw a 3d plot for two variables and their correspond output, for example:
+
+```{r, eval=TRUE, fig.align='center' }
+# explanatory variable 1
+x1 <- seq(-1, 1, length.out = 30)
+
+# explanatory variable 2
+x2 <- seq(0, 2*pi, length.out = 30)
+
+# response variable
+plot_example_func <- function(x) { 
+  x[1]*cos(x[2])*2
+}
+
+# all combinations of x1 and x2
+df_plot_example <- expand.grid(X1 = x1, X2 = x2)
+
+# generate correspond output 
+df_plot_example$z <- apply(df_plot_example, 1, plot_example_func)
+
+# re-shape z for the plotting function
+Z <- matrix(df_plot_example$z, ncol=30)
+par(mar=c(1,1,1,1))
+persp(x = x1, y = x2, z = Z, theta = -30, phi = 30, expand = 0.75, col = "lightblue")
+```
+
+
+Or, we can use the following snippet to map a space curve into 2d:
+
+```{r, eval=TRUE}
+plot2dfunction <- function(fnc, b0range, b1range){
+  b0_plot <- seq(b0range[1],b0range[2],length.out=100)
+  b1_plot <- seq(b1range[1],b1range[2],length.out=100)
+  df_plot <- data.frame(b0 = b0_plot, b1=b1_plot)
+  df_plot <- df_plot %>% tidyr::expand(b0, b1) %>% rowwise() %>% mutate(nll = fnc(c(b0,b1)))
+  ggplot(data=df_plot) +
+    geom_contour_filled(aes(x=b0, y=b1, z=nll)) 
+}
+```
+
+
+```{r, eval=TRUE, fig.align='center', out.width="75%"}
+plot2dfunction(fnc = plot_example_func, b0range = c(-1, 1), b1range = c(0, 2*pi)) + coord_fixed(1/pi) 
+```
+The minimum within the provided range is located in the darkest shaded region.
+
+
+Let's try to visualise the `negloglikelihood()` function we got earlier, make sure to give the *b0range* and *b1range* that would contain the pair we obtained from `optim()`.
+
+
+```{r, class.source="fill-in-blank"}
+plot2dfunction(fnc = negloglikelihood, b0range = ____, b1range = ____)
+```
+
+```{r eval=FALSE, include=FALSE}
+plot2dfunction(fnc = negloglikelihood, b0range = c(-100, 100), b1range = c(-10, 10))
+```
+
+## Estimate coefficients with built-in function
+
+
+Of course there is a built-in function in R that can do all of the above for us. This is `glm()` and we will need to set `family=binomial`. 
+
+The ouput result is very similar to the output from `lm()`.
+
+
+```{r, eval=TRUE}
+logreg.fit <- glm(medv_new ~ rm, data = df_train, family = binomial)
+summary(logreg.fit)
+```
+*Do you get the same results as in your "pedestrian" calculation above?*
+
+## Confusion Matrix
+
+We used (r)MSE to evaluate the performance of regression models in last two labs, for classification, we shall rely on the confusion matrix.
+
+```{r, echo=FALSE, eval=TRUE, fig.align='center',  fig.cap="(By https://www.evidentlyai.com/classification-metrics/confusion-matrix)"}
+knitr::include_graphics("ConfusionMatrix.png")
+```
+
+As the above illustration, all cases can be categorised into four regions, 
+
+- **it is actually TRUE and we predict it as TRUE--True Positive(TP)**
+- **it is actually FALSE and we predict it as FALSE--True Negative(TN)**
+- it is actually TRUE but we predict it as FALSE--False Negative(FN)
+- it is actually FALSE but we predict it as TRUE--False Positive(FP)
+
+The first two situations are the correct prediction(in green), the proportion of those two portions combined is the accuracy.
+
+In our case, if we apply the $g_1(x;\hat{b_0}, \hat{b_1})$ function to `df_test$rm`, we shall get the classification prediction:
+
+
+```{r, class.source="fill-in-blank"}
+# build the g1 function with the coefficients 
+func_g1 <- function(x, bhat){
+  # chance of being "High" with the given coefficients
+  prob = (exp(____ + x * ____)/(1 + exp(____ + x * ____)))
+  return(prob)
+}
+
+df_test <- df_test %>% 
+  mutate(
+    # generate a column for predict chance being "High" with the coefficients obtained above
+    pred_prob = func_g1(x = ____, bhat = ____),
+    # if the chance is greater than the threshold, than classify the case as TRUE("High")
+    pred_class =  pred_prob >= 0.5)
+```
+
+
+
+```{r, eval=TRUE, include=FALSE}
+# build the g1 function with the coefficients 
+func_g1 <- function(x, bhat){
+  # chance of being "High" with the given coefficients
+  prob = (exp(bhat[1]+ x*bhat[2])/(1+exp(bhat[1]+ x*bhat[2])))
+  return(prob)
+}
+
+df_test <- df_test %>% 
+  mutate(
+    # generate a column for predict chance being "High" with the coefficients obtained above
+    pred_prob = func_g1(x = rm, b = bhat),
+    # if the chance is greater than the threshold, than classify the case as TRUE("High")
+    pred_class_by_hand =  pred_prob >= 0.5)
+```
+
+
+
+The `logreg.fit` also returned us the coefficients, we can use it to perform the prediction on testing set as well, set `type=` as *response* to get the predicted probabilities.
+
+
+```{r, class.source="fill-in-blank"}
+df_test <- df_test %>% 
+  mutate(
+    pred_class_by_glm =  predict(logreg.fit, newdata = ____, type = "____") >= ____
+  )
+```
+
+
+
+```{r include=FALSE, eval=TRUE}
+df_test <- df_test %>% 
+  mutate(
+    pred_class_by_glm =  predict(logreg.fit, newdata = df_test, type = "response") >= 0.5
+  )
+```
+
+
+If we have the same coefficients from those two methods, we shall have the same classification results here.
+
+
+
+The confusion matrix for our test can be formed as:
+
+
+```{r}
+TP <- sum(df_test$medv_new + df_test$pred_class_by_hand > 1)
+TN <- sum(df_test$medv_new + df_test$pred_class_by_hand < 1)
+FN <- sum(df_test$medv_new > 0 & df_test$pred_class_by_hand < 1)
+FP <- sum(df_test$medv_new < 1 & df_test$pred_class_by_hand > 0)
+
+confusion_matrix = matrix(c(TP,FP,FN,TN), 2, 2)
+rownames(confusion_matrix) <- c("Actual TRUE", "Actual FALSE")
+colnames(confusion_matrix) <- c("Pred TRUE", "Pred FALSE")
+print(confusion_matrix)
+```
+
+*What is the accuracy?*
+
+
+:::{.boxTask}
+Give it a go:
+
+There are functions to build confusion matrix as well, try `table(df_test$medv_new, df_test$pred_class_by_hand)` or the `confusionMatrix()` function from `caret` package.
+:::
+
+
+The confusion matrix can give us information more than just accuracy, in fact, it is not even necessary to build a confusion matrix if we just want the accuracy, once we have the prediction, we just need the following code to find out what's the proportion of correct prediction:
+
+```{r}
+# accuracy: proportion of correct prediction
+mean(df_test$medv_new == df_test$pred_class_by_hand)
+```
+
+Some other often used metrics include:
+
+- Precision, how many of the correctly predicted cases actually turned out to be positive. $Precision = \frac{TP}{TP+FP}$
+- Sensitivity (or, recall, true positive rate), how many of the actual positive cases we were able to predict correctly $Sensitivity = \frac{TP}{TP+FN}$
+
+Precision is a useful metric in cases where *False Positive* is a higher concern than *False Negatives*, for example, in recommendation system, wrong results could lead to customers cancel their subscriptions and be harmful to the business. On the other hand, recall is a useful metric in cases where *False Negative* overtakes *False Positive*, in medical cases, it might not hurt much to raise a false alarm, but if we let a positive case slip away, the consequences could be much more serious.  
+
+When we set different thresholds for a better precision, the recall will go down and vice-versa, the F1-score is the harmonic mean between these two to give us a combined idea
+
+There are other metrics like specificity, false positive rate and a lot more can be included in a confusion matrix, shall us take into account the actual circumstances and select the appropriate one for evaluation.
+
+
+# Multiple Logistic Regression
+
+Similar to linear regressions, we can involve multiple explanatory variables for logistic regression too. Let's add *age* and *ptratio* into account.
+
+## Estimate coefficients by hand 
+
+The process is similar to simple logistic regression, but we will do it in a matrix manner this time.
+
+
+```{r}
+# form the X matrix with 1s and involved variable only
+X <- cbind(rep(1, 404), df_train[c( "age", "ptratio", "rm")]) %>% as.matrix()
+
+# form the y matrix with response only
+y <- df_train$medv_new %>% as.matrix()
+
+# form the negative likelihood function similar to the single logistic regression
+negloglikelihood2 <- function(b2) {
+return(-sum(y * (X %*% b2) - log(1 + exp(X %*% b2))))
+}
+
+# form a gradient function for negloglikelihood2() to get a better optimiser 
+gradient_negloglikelihood2 <- function(b2) {
+ return(-(t(X) %*% (y - exp(X %*% b2)/(1+exp(X %*% b2)))))
+}
+
+# run optimisation
+result2 <- optim(par = rep(0, 4), fn = negloglikelihood2, gr = gradient_negloglikelihood2, method = "BFGS")
+
+# Extract the estimated coefficients
+bhat2 <- result2$par
+bhat2
+```
+## Estimate coefficients with built-in function
+
+It is almost identical with `glm()` for multiple logistic regression:
+
+```{r, class.source="fill-in-blank"}
+logreg.fit2 <- glm(medv_new ~ ____ + ____ + ____, data = df_train, family = binomial)
+summary(logreg.fit2)
+```
+
+
+
+
+```{r}
+logreg.fit2 <- glm(medv_new ~ age + ptratio + rm, data = df_train, family = binomial)
+summary(logreg.fit2)
+
+prediction2 <- ifelse(predict(logreg.fit2, newdata = df_test, type = "response") >= 0.5, 1, 0)
+df_test <- df_test %>% 
+  mutate(pred_class_by_glm2 = predict(logreg.fit2, newdata = df_test, type = "response") >= 0.5)
+
+```
+
+
+
+
+## Confusion martix
+
+:::{.boxTask}
+Give it a go:
+
+Use **logreg.fit2** to predict on `df_test`, form the confusion matrix and answer following questions:
+
+- How many cases are predicted correctly?
+- What is the accuracy of this prediction?
+- How many positive cases(the "High" class in medv_new) are predicted correctly?
+- What is the proportion that positive cases are predicted correctly?
+- What is the proportion that predicted positive cases are actually positive?
+- What is the F1 score?
+- How is the performance compared to simple logistic regression accuracy-wise?
+:::
+
+
+
+*End of lab5*
+
+
+
+

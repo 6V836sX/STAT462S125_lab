@@ -1,0 +1,101 @@
+---
+title: "Visualisation of 2d classification"
+author: "Philipp Wacker"
+date: "2024-08-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synthetic data
+
+```{r}
+library(tidyr)
+library(tidyverse)
+f <- function(x1, x2){
+  1.1*(x1-0.4)^2 + 0.2*(x2+0.2)^2 - 0.6*(x1-0.4)*(x2+0.2) + 2*(x1)^3
+}
+
+xplot <- seq(-3,3,0.1)
+yplot <- seq(-6,6,0.2)
+dfplot <- data.frame(x=xplot, y=yplot) %>% tidyr::expand(x, y)
+
+dfplot <- data.frame(x=xplot, y=yplot) %>% tidyr::expand(x, y)  %>% mutate(z = f(x,y))
+
+ggplot(dfplot) +
+  geom_point(aes(x=x, y=y, colour = (z<=0.9)))
+
+
+```
+
+Generate dataset for classification:
+
+```{r}
+
+xsamples <- rnorm(1000,0,1)
+ysamples <- rnorm(1000,0,2)
+z <- 1*(f(xsamples, ysamples) < 0.9)
+dfclass <- data.frame(x=xsamples, y=ysamples, z=z)
+ggplot(dfclass) + 
+  geom_point(aes(x=x,y=y,col=z))
+```
+
+```{r}
+logreg.model <- glm(z ~x + y +x:y, family = binomial(), data=dfclass)
+summary(logreg.model)
+
+dfplot$z.pred.logreg <- predict(logreg.model, type="response", newdata=dfplot)
+
+ggplot() +
+  geom_point(data=dfplot, aes(x=x,y=y,color=(z.pred.logreg>=0.5)), alpha=0.1, size=1) +
+  geom_contour(data=dfplot, aes(x=x,y=y,z=z.pred.logreg), breaks=c(0.5), linewidth=2) +
+  geom_point(data=dfclass, aes(x=x, y=y, col=(z>=0.5)))
+```
+## QDA model
+
+```{r}
+# compute pi1 and pi2
+n0 <- dfclass %>% filter(z == 0) %>% nrow
+pi0 <- n0/nrow(dfclass)
+print(pi0)
+pi1 <- 1 - pi0
+
+mean0 <- dfclass %>% filter(z == 0) %>% dplyr::select(c(x,y)) %>% colMeans
+mean1 <- dfclass %>% filter(z == 1) %>% dplyr::select(c(x,y)) %>% colMeans
+print(mean1)
+
+cov0 <- dfclass %>% filter(z == 0) %>% dplyr::select(c(x,y)) %>% cov
+cov0inv <- solve(cov0)
+cov1 <- dfclass %>% filter(z == 1) %>% dplyr::select(c(x,y)) %>% cov
+cov1inv <- solve(cov1)
+print(cov0)
+
+delta0 = function(xy){
+  -(xy-mean0)%*% (cov0inv %*% (xy-mean0))/2 - log(det(cov0))/2 + log(pi0)
+}
+delta1 = function(xy){
+  -(xy-mean1)%*% (cov1inv %*% (xy-mean1))/2 - log(det(cov1))/2 + log(pi1)
+}
+
+pred.QDA = function(xy){
+  d0 <- delta0(xy)
+  d1 <- delta1(xy)
+  if (d0 > d1){
+    return(0)
+  }
+  else{
+    return(1)
+  }
+}
+pred.QDA(c(2,-4))
+
+dfplot <- dfplot %>% rowwise %>% mutate(z.pred.QDA = pred.QDA(c(x,y)))
+
+ggplot() +
+  geom_point(data=dfplot, aes(x=x,y=y,color=(z.pred.QDA>=0.5)), alpha=0.1, size=1) +
+  geom_contour(data=dfplot, aes(x=x,y=y,z=z.pred.QDA), breaks=c(0.5), linewidth=2) +
+  geom_point(data=dfclass, aes(x=x, y=y, col=(z>=0.5)))
+```
+

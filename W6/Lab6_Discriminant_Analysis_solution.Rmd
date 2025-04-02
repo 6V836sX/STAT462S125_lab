@@ -1,0 +1,413 @@
+---
+title: "STAT462 Computer Lab 6"
+subtitle: "Quadratic Discriminant Analysis"
+author: "Speedy Jiang"
+output:
+  html_document: 
+    toc: yes
+    number_sections: yes
+    toc_float: yes
+---
+
+
+
+
+```{=html}
+<style>
+.boxTask {
+background-color: lightblue;
+color: black;
+border: 2px solid black;
+margin: 5px;
+padding: 5px;
+font-style: italic;
+}
+
+
+.boxNote {
+background-color: Tomato;
+color: black;
+border: 2px solid black;
+margin: 5px;
+padding: 5px;
+}
+
+.fill-in-blank {
+background-color: lightyellow;
+border: 2px solid #6f2c87;
+}
+
+.answer {
+background-color: #e7f4e4;
+border: 2px solid #6f2c87;
+}
+
+</style>
+```
+
+
+```{r setup, include = FALSE}
+Sys.setenv(LANG = "en")
+knitr::opts_chunk$set(
+                      message=FALSE,
+                      warning=FALSE,
+                      fig.align='center',
+                      out.width='75%')
+library(ISLR2)
+library(tidyverse)
+library(MASS)
+```
+
+
+We learnt a classification method last week and this week we will explore another method, Quadratic Discriminant Analysis.
+
+
+:::{.fill-in-blank}
+The normal code blocks are with grey background, but some of the codes are not complete, you will need to replace the "____" part with your own code to run it smoothly, those code blocks are styled like this one. 
+:::
+
+<br>
+
+:::{.answer}
+A code chunk with this format means it's a possible solution to fill the blanks in the original lab file.
+:::
+
+# Discriminant function
+
+In discriminant analysis, We model the distribution of the predictors separately in each of the response category, then we class the response with the highest possible category.
+
+
+
+# QDA on 1d feature by hand
+
+Let's start with an easy one. Suppose we have the following dataset and wish to use *age* to predict *likes_metal*.
+
+```{r}
+age <- c(25, 36, 22, 41, 36, 40, 34, 29, 32, 45, 31, 25, 45, 38)
+likes_metal <- c(F, F, F, F, T ,F, F, F, T, T, F, F, T, T)
+df_music <- data.frame(age = age, likes_metal = as.numeric(likes_metal))
+
+ggplot() +
+  geom_jitter(data = df_music, aes(x = age, y = likes_metal), height = 0, width = 0.2) +
+  scale_x_continuous(breaks = seq(20, 50, 2))
+```
+
+For the *one-dimensional* feature space, the discriminant score function is $$ \delta_k( x) = -\frac{( x -  m_k)^2 }{2\sigma_k^2} - \log \sigma_k + \log \pi_k$$ 
+A case will be labelled as the class with the highest score. 
+
+To calculate the discriminant score for `F` class, we need to find its $\pi_F$, $m_F$ and $\sigma_F^2$ (Note that the $\pi$ here denotes the prior probability, not the mathmetical constant $3.14159265\cdots$): 
+
+```{r}
+# relative frequency for F class:
+n_F <- df_music %>% filter(likes_metal == 0) %>% nrow
+pi_F <- n_F/nrow(df_music)
+
+# mean age for F class
+m_F <- df_music %>% filter(likes_metal == 0) %>% dplyr::select(age) %>% colMeans
+
+# variance of age for F class
+Sigma_F <- df_music %>% filter(likes_metal == 0) %>% dplyr::select(age) %>% var %>% as.vector
+```
+
+Then, we can form the function to return the discriminant score for *F* class: 
+
+```{r}
+delta_F <- function(x) {
+  return(-(x - m_F)^2/(2 * Sigma_F) - log(sqrt(Sigma_F)) + log(pi_F))
+}
+```
+
+Let's visualise the pattern between age and it's corresponding discriminant score for F class: 
+
+```{r}
+ggplot() +
+  # plot the function curve for F class
+  geom_function(fun = delta_F, aes(color = "F"), linewidth = 1) +
+  # set the x axis range and tick step
+  scale_x_continuous(limits = c(20, 50), breaks = seq(20, 50, 2)) +
+  labs(x = "Age",
+       y = "Discriminant Score",
+       color = "Class")
+```
+
+
+
+:::{.boxTask}
+Give it a go:
+
+What is the discriminant score of a person aged 37 for F class?
+:::
+
+
+```{r class.source="answer"}
+delta_F(37)
+```
+
+
+Next step is to repeat the same process for *T* class: 
+
+
+```{r class.source="answer"}
+# relative frequency for T class:
+n_T <- df_music %>% filter(likes_metal== 1) %>% nrow
+pi_T <- n_T/nrow(df_music)
+
+# mean age for T class
+m_T <- df_music %>% filter(likes_metal== 1) %>% dplyr::select(age) %>% colMeans
+
+# variance of age for T class
+Sigma_T <- df_music %>% filter(likes_metal== 1) %>% dplyr::select(age) %>% var %>% as.vector
+
+delta_T <- function(x) {
+  return(-(x - m_T)^2/(2 * Sigma_T) - log(sqrt(Sigma_T)) + log(pi_T))
+}
+```
+
+
+We can include the discriminant score function for T class to the plot above now.
+
+```{r}
+ggplot() +
+  # plot the function curve for F class
+  geom_function(fun = delta_F, aes(color = "F"), linewidth = 1) +
+  # plot the function curve for T class
+  geom_function(fun = delta_T, aes(color = "T"), linewidth = 1) +
+  # set the x axis range and tick step
+  scale_x_continuous(limits = c(20, 50), breaks = seq(20, 50, 2)) +
+  labs(x = "Age",
+       y = "Discriminant Score",
+       color = "Class")
+```
+
+So What is the discriminant score of a person aged 37 for T class and what is the decision on prediction? 
+
+When age is 37, the F class curve is above the T class curve, which means the F class has a higher discriminant score, so we will categorise age 37 as F. Now we have a qda model using age to predict likes metal or not. 
+
+```{r}
+ifelse(delta_F(37) > delta_T(37), 0, 1)
+```
+To map this relationship onto the original graph: 
+
+```{r}
+ggplot() +
+  geom_jitter(data = df_music, aes(x = age, y = likes_metal), height = 0, width = 0.2) +
+  geom_function(fun = ~ ifelse(delta_F(.x) > delta_T(.x), 0, 1), 
+                colour = "red",
+                linetype = "dashed",
+                n = 1001)+
+  scale_x_continuous(limits = c(20, 50), breaks = seq(20, 50, 2))
+```
+
+# QDA on 2d features by hand
+
+We now consider a more general situation, there are more than one explanatory variables.
+The general discriminant score function now becomes: 
+
+$$ \delta_k(\underline x) = -\frac{(\underline x - \underline m_k)^\top C_k^{-1} (\underline x - \underline m_k)}{2} - \frac{\log \mathrm{det}(C_k)}{2} + \log \pi_k$$
+
+We still need to find the *mean*, *covariance* and the *relative frequency*, but now we represent them with matrix.
+
+We will use a more complex dataset for this example, the `Default` dataset contains three explanatory variables, we will be using *income* and *balance* to predict whether a customer would default (labelled as "Yes") on their debt or not (labelled as "No") for this lab.
+
+## Set up
+
+Import the dataset from `ISLR2` package:
+
+```{r}
+library(ISLR2)
+df_default <- Default
+```
+
+Visualise the explanatory variables and the response.
+
+```{r}
+ggplot(data=df_default) +
+  geom_point(aes(x=balance, y=income, color=default), alpha = 0.5)
+```
+
+Split the dataset into a training set and a test set with the ratio of 8:2.
+
+```{r}
+set.seed(1)
+train_ind <- sample(1:10000, size = 10000*0.8)
+
+df_train <- df_default[train_ind, ]
+df_test <- df_default[-train_ind, ]
+```
+
+
+## Build up discriminant score function
+
+Similar with 1d-feature situation, we need to find means, covariance and relative frequencies to build  the discriminant score functions for each class.
+
+Figure out how many classes in the response: 
+
+```{r}
+unique(df_train$default)
+```
+We have two classes, "No" and "Yes".
+
+
+Let's start with the majority:
+
+Relative frequency for "No" class: 
+
+```{r}
+n_no <- df_train %>% filter(default == "No") %>% nrow
+pi_no <- n_no/nrow(df_train)
+pi_no
+```
+
+Means for "No" class:
+
+```{r}
+m_no <- df_train %>% filter(default == "No") %>% dplyr::select(balance, income) %>% colMeans
+m_no
+```
+Covariance for "No" class:
+
+```{r}
+Sigma_no <- df_train %>% filter(default == "No") %>% dplyr::select(balance, income) %>% cov
+Sigma_no
+```
+Form the discriminant score function for "No" class:
+
+```{r}
+delta_no <- function(X){
+  return(-t(X-m_no)%*%solve(Sigma_no)%*%(X-m_no)/2 - log(det(Sigma_no))/2 + log(pi_no))
+}
+```
+
+
+:::{.boxTask}
+What is the "No" score for a case with 2000 balance and 40000 income?
+:::
+
+
+```{r class.source="answer"}
+delta_no(c(2000, 40000))
+```
+
+
+We shall build the discriminant score function for "Yes" class as well:
+
+```{r, class.source="answer"}
+n_yes <- df_train %>% filter(default == "Yes") %>% nrow
+pi_yes <- n_yes/nrow(df_train)
+m_yes <- df_train %>% filter(default == "Yes") %>% dplyr::select(balance, income) %>% colMeans
+Sigma_yes <- df_train %>% filter(default == "Yes") %>% dplyr::select(balance, income) %>% cov
+delta_yes <- function(X){
+  return(-t(X-m_yes)%*%solve(Sigma_yes)%*%(X-m_yes)/2 - log(det(Sigma_yes))/2 + log(pi_yes))
+}
+```
+
+
+Once we have the discriminant score functions for each class, we can feed the test set to them and predict the response based on the scores.
+
+
+```{r, class.source="answer"}
+df_test <- df_test %>% 
+  rowwise() %>% 
+  mutate(pred_by_hand = as.factor(ifelse(delta_yes(c(balance, income)) > delta_no(c(balance, income)), "Yes", "No")))
+```
+
+
+*Be aware that the input order of the explanatory variables matters here.*
+
+## Visualisation
+
+We can use `geom_contour()` or `geom_tile()` to draw us the boundary line for a QDA model.
+
+```{r}
+# Generate a grid of points for contour or tile plot
+plot_grid <- expand.grid(income = seq(min(df_test$income), max(df_test$income), length.out = 100),
+                         balance = seq(min(df_test$balance), max(df_test$balance), length.out = 100))
+
+# class those points with the discriminant functions we just built
+plot_grid <- plot_grid %>% 
+  rowwise() %>% 
+  mutate(pred_by_hand = as.factor(ifelse(delta_yes(c(balance, income)) > delta_no(c(balance, income)), "Yes", "No")))
+
+# Plot the test set with predicted classes and decision boundary
+ggplot() +
+  # actual classification
+  geom_point(data = df_test, aes(x = balance, y = income, color = default), alpha = 0.5) +
+  # separate by a boundary line
+  geom_contour(data = plot_grid, aes(x = balance, y = income, z = as.numeric(pred_by_hand)),
+               color = "black", bins = 1) +
+  # separate by background color
+  geom_tile(data = plot_grid, aes(x = balance, y = income, fill = pred_by_hand), alpha = 0.3) +
+  labs(title = "QDA Predictions on Test Set with Decision Boundary",
+       x = "balance",
+       y = "income",
+       color = "Actual Class",
+       fill = "Prediction") +
+  # I prefer actual classification first then prediction
+  guides(color = guide_legend(order = 1)) +
+  theme(legend.key = element_rect(fill = NA))
+```
+
+
+
+## Confusion Matrix
+
+We can get a roughly idea about the performance of the QDA prediction though the plot above, it seems that there was only one "No" case that falls in the region we predicted "Yes" while more "Yes" cases were predicted the other way. Let's form the confusion matrix to get a more precise evaluation.
+
+```{r, class.source="answer"}
+# True Positive count
+TP <- sum(df_test$default == "Yes" & df_test$pred_by_hand == "Yes")
+# True Negative count
+TN <- sum(df_test$default == "No" & df_test$pred_by_hand == "No")
+# False Negative count
+FN <- sum(df_test$default == "Yes" & df_test$pred_by_hand == "No")
+# False Positive count
+FP <- sum(df_test$default == "No" & df_test$pred_by_hand == "Yes")
+
+confusion_matrix = matrix(c(TP,FP,FN,TN), 2, 2)
+rownames(confusion_matrix) <- c("Actual TRUE", "Actual FALSE")
+colnames(confusion_matrix) <- c("Pred TRUE", "Pred FALSE")
+print(confusion_matrix)
+```
+
+:::{.boxNote}
+What is the accuracy? Is it a genuine metric for this case? If not, what is the better option?
+:::
+
+<br>
+
+:::{.answer}
+The accuracy is not an appropriate metric for this case, the consequence of a false negative case is more serious than a false positive case, we would prefer a result with less false negative counts or lower false negative rate(FN/(FN+TP)).
+:::
+
+
+# QDA on 2d features with built-in function
+
+Yes, there is a built function for QDA, it's `qda()` from `MASS` package, the syntax is similar to other functions we have covered in previous labs:
+
+
+```{r, class.source="answer"}
+library(MASS)
+qda_model <- qda(default ~ income + balance, data = df_train)
+
+df_test <- df_test %>% 
+  ungroup() %>% 
+  mutate(
+    pred_qda = predict(qda_model, newdata = df_test)[[1]]
+  )
+
+any(df_test$pred_by_hand != df_test$pred_qda)
+all(df_test$pred_by_hand == df_test$pred_qda)
+
+library(caret)
+confusionMatrix(df_test$default, df_test$pred_qda)
+
+```
+
+
+Do you have the same results from two approaches?
+
+*End of lab6*
+
+
+
+
